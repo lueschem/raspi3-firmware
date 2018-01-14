@@ -6,11 +6,15 @@ set -e
 case "$1" in
   configure)
 
-    if ! ischroot; then
-      if ! mountpoint -q /boot/firmware; then
-        echo "Error: missing /boot/firmware, did you forget to mount it?" >&2
-        exit 1
-      fi
+    if ischroot ; then
+      # chroot detected - skip mount point check
+      mkdir -p /boot/firmware
+    elif test -e /usr/bin/systemd-detect-virt && systemd-detect-virt -q ; then
+      # virtualization detected - skip mount point check
+      mkdir -p /boot/firmware
+    elif ! mountpoint -q /boot/firmware; then
+      echo "Error: missing /boot/firmware, did you forget to mount it?" >&2
+      exit 1
     fi
 
     for file in /usr/lib/raspi3-firmware/*
