@@ -5,22 +5,19 @@
 
 set -e
 
+check_dtb()
+{
+  dtb=$1
+  if [ ! -e "$dtb" ]; then
+    echo "raspi3-firmware: device tree file $dtb does not exist, cannot populate /boot/firmware"
+    exit 0
+  fi
+}
+
 # Play nice when run under debconf.
 exec </dev/null >&2
 
 eval set -- "$DEB_MAINT_PARAMS"
-
-
-# Detect appropriate .dtb
-arch=$(dpkg --print-architecture)
-case ${arch} in
-  armhf)
-    dtb=bcm2836-rpi-2-b.dtb
-    ;;
-  arm64)
-    dtb=bcm2837-rpi-3-b.dtb
-    ;;
-esac
 
 # Only run on configure and remove to avoid unnecessary work.
 case "$1" in
@@ -52,20 +49,37 @@ if [ -z "$latest_initrd" ]; then
   exit 0
 fi
 
-latest_dtb="/usr/lib/linux-image-${latest_kernel#/boot/vmlinuz-}/broadcom/${dtb}"
-
-if [ ! -e "$latest_dtb" ]; then
-  echo "raspi3-firmware: device tree file ${latest_dtb} does not exist, cannot populate /boot/firmware"
-  exit 0
+arch=$(dpkg --print-architecture)
+if [ "arm64" = "$arch" ]; then
+  dtb_path="/usr/lib/linux-image-${latest_kernel#/boot/vmlinuz-}/broadcom"
+else
+  # there is no vendor subdirectory for armhf
+  dtb_path="/usr/lib/linux-image-${latest_kernel#/boot/vmlinuz-}"
 fi
 
+pi2b_dtb_soc=${dtb_path}/bcm2836-rpi-2-b.dtb
+pi2b_dtb_family=bcm2709-rpi-2-b.dtb
+pi3b_dtb_soc=${dtb_path}/bcm2837-rpi-3-b.dtb
+pi3b_dtb_family=bcm2710-rpi-3-b.dtb
+
+if [ "armhf" = "$arch" ]; then
+  # the rpi-2-b only supports 32-bit
+  check_dtb $pi2b_dtb_soc
+fi
+check_dtb $pi3b_dtb_soc
+
+# start to modify only after all tests above were successful
 cp "$latest_kernel" /boot/firmware/
 cp "$latest_initrd" /boot/firmware/
-cp "$latest_dtb" /boot/firmware/
+
+# copy all possible dtbs - the firmware will automagically choose the right one
+if [ "armhf" = "$arch" ]; then
+  cp "$pi2b_dtb_soc" /boot/firmware/${pi2b_dtb_family}
+fi
+cp "$pi3b_dtb_soc" /boot/firmware/${pi3b_dtb_family}
 
 latest_kernel_basename=$(basename "$latest_kernel")
 latest_initrd_basename=$(basename "$latest_initrd")
-latest_dtb_basename=$(basename "$latest_dtb")
 
 if [ "arm64" = "$arch" ]; then
   cat >/boot/firmware/config.txt <<EOF
@@ -82,7 +96,6 @@ fi
 cat >>/boot/firmware/config.txt <<EOF
 enable_uart=1
 
-device_tree=${latest_dtb_basename}
 kernel=${latest_kernel_basename}
 # For details on the initramfs directive, see
 # https://www.raspberrypi.org/forums/viewtopic.php?f=63&t=10532
